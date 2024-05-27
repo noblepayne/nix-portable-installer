@@ -1,0 +1,50 @@
+#!/usr/bin/env sh
+set -o errexit
+
+install () {
+
+  # Setup locations.
+  export NP_LOCATION="${NP_LOCATION:-/dev/shm}"  # Default to memory backed nix install. Used by nix-portable.
+  NIX_PORTABLE_URL=${NIX_PORTABLE_URL:-"https://github.com/DavHau/nix-portable/releases/latest/download/nix-portable-$(uname --machine)"}
+  NIX_PORTABLE_EXE=${NIX_PORTABLE_EXE:-$NP_LOCATION/nix-portable}
+  NIX_PORTABLE_DIR=${NIX_PORTABLE_DIR:-$NP_LOCATION/.nix-portable}
+  NIX_DIR=${NIX_DIR:-$NIX_PORTABLE_DIR/nix}
+  NIX_CONFIG=${NIX_CONFIG:-$HOME/.config/nix/nix.conf}
+  NIXPKGS_CONFIG=${NIXPKGS_CONFIG:-$HOME/.config/nixpkgs/config.nix}
+
+  # Setup backing nix storage.
+  mkdir -p "${NIX_DIR}"
+
+  # Setup `/nix` so hardcoded paths work without userns/proot.
+  sudo mkdir -p /nix
+
+  # Mount backing storage to /nix.
+  sudo mount --bind "${NIX_DIR}" /nix
+
+  # Fetch nix-portable
+  if [ ! -f "${NIX_PORTABLE_EXE}" ]; then
+    curl -Lo "${NIX_PORTABLE_EXE}" "${NIX_PORTABLE_URL}"
+    chmod +x "${NIX_PORTABLE_EXE}"
+  fi
+
+  # Install nix! Use latest nix to install latest nix.
+  /dev/shm/nix-portable nix run nixpkgs#nix -- profile install nixpkgs#nix
+
+  # Copy nix config from nix-portable if not present on system already.
+  if [ ! -f "${NIX_CONFIG}" ]; then
+    mkdir -p "$(dirname "${NIX_CONFIG}")"
+    cp "${NIX_PORTABLE_DIR}/conf/nix.conf" "${NIX_CONFIG}"
+  fi
+
+  # Allow unfree packages from nixpkgs if no nixpkgs conf is present.
+  if [ ! -f "${NIXPKGS_CONFIG}" ]; then
+    mkdir -p "$(dirname "${NIXPKGS_CONFIG}")"
+    echo '{ allowUnfree = true; }' > "${NIXPKGS_CONFIG}"
+  fi
+
+  # Fin.
+  echo "All done! Use the below to add nix to your path."
+  echo export PATH=\"\$PATH:\$HOME/.nix-profile/bin\"
+}
+
+install
